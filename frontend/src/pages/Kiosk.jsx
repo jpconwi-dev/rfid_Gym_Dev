@@ -24,6 +24,7 @@ export default function Kiosk() {
   const [recent, setRecent] = useState([]);
   const [sd, setSd] = useState(null);
   const [err, setErr] = useState("");
+  const [legacy, setLegacy] = useState(false);
   const [manual, setManual] = useState("");
   const keyRef = useRef(key);
   keyRef.current = key;
@@ -72,6 +73,8 @@ export default function Kiosk() {
   }, []);
 
   const onLine = (line) => {
+    const old = line.match(/^UID:\s*(.+)$/i);
+    if (old) { setLegacy(true); return handleScan(old[1].trim(), null); }
     const c = line.match(/^CARD:(.+)\|(\w+)$/i);
     if (c) return handleScan(c[1].trim(), c[2] === "NONE" ? null : c[2]);
     if (line === "WROTE:OK" && pending.current) {
@@ -160,6 +163,7 @@ export default function Kiosk() {
         <Link to="/">Login</Link>
       </div>
       {!serialSupported() && <div className="msg warn" style={{ margin: 12 }}>This browser has no Web Serial support. Use Chrome or Edge on a desktop/laptop.</div>}
+      {legacy && <div className="msg warn" style={{ margin: 12 }}>The Arduino is running the OLD sketch. Upload the new RFID_Membership.ino from the latest zip to enable secure cards and the LCD results.</div>}
       {err && <div className="msg err" style={{ margin: 12 }}>{err}</div>}
       {recent.length > 0 && (
         <div className="kbar" style={{ gap: 18 }}>

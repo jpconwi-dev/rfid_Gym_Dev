@@ -26,7 +26,6 @@ function RegisterModal({ onClose, onCreated }) {
   const [uid, setUid] = useState("");
   const [mode, setMode] = useState("tap");
   const [months, setMonths] = useState(1);
-  const [scans, setScans] = useState([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const base = useRef(null);
@@ -35,7 +34,6 @@ function RegisterModal({ onClose, onCreated }) {
 
   useEffect(() => {
     const load = () => api.unregistered().then((list) => {
-      setScans(list);
       if (base.current === null) { base.current = new Map(list.map((s) => [s.uid, s.last_seen])); return; }
       const fresh = list.find((s) => base.current.get(s.uid) !== s.last_seen);
       if (fresh) {
@@ -85,14 +83,6 @@ function RegisterModal({ onClose, onCreated }) {
                     <div>Waiting for a card… tap the new card on the kiosk scanner.</div></>
                 )}
               </div>
-              {scans.length > 0 && (
-                <><div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Or pick a card scanned in the last 24 hours:</div>
-                  <div className="chips">
-                    {scans.map((s) => (
-                      <button type="button" key={s.uid} className={`chip mono ${uid === s.uid ? "on" : ""}`} onClick={() => setUid(s.uid)}>{maskUid(s.uid)}</button>
-                    ))}
-                  </div></>
-              )}
             </>
           ) : (
             <input className="mono" placeholder="e.g. A1 B2 C3 D4" value={uid} onChange={(e) => setUid(e.target.value)} autoComplete="off" />
