@@ -21,9 +21,18 @@ React (Vercel) + FastAPI (Render) + Arduino Uno (RC522, I2C LCD, SD module).
 | `/admin` | admin | overview + storage bar, register / renew / ban / delete members, reset password, attendance log |
 | `/member` | member | days left, hours this week/month, 14-day chart, recent sessions (read-only) + change password |
 
-**Registering a member:** tap the new card on the kiosk (it is remembered as "unregistered"), open *Members → Register member*,
-type the name, pick the card, choose months paid → the app shows a **default username and password** once. The member must change the
+**Registering a member:** open *Members → Register member*, type the name, then either **tap the card on the kiosk** (auto-detected) or **type the card number**, choose months paid → the app shows a **default username and password** once. The member must change the
 password on first login. *Reset pw* issues a new default password.
+
+## Card security (anti-cloning)
+A card's UID is not secret and can be copied by phone apps or "magic" cards, so the UID alone is never trusted after setup:
+1. Registering a member creates a random **secret code** for that member (stored only on the server and on the card).
+2. The **first tap** on the kiosk writes the secret into the card (sector 1, locked with `SECRET_KEY` from the sketch). The screen says "Card secured" — tap again to check in. Admin → Members shows **secured / not secured** per card.
+3. From then on every tap must present UID **and** secret. A copied UID without the secret shows "Invalid card".
+* Existing members (created before this update) are secured automatically on their next tap. Do the first tap yourself when you hand over a card.
+* Card numbers are masked in the app (only the last 2 bytes are visible); members cannot edit anything, and a card can belong to one member only.
+* Limits: this needs **MIFARE Classic 1K/4K** cards (the usual blue/white RC522 cards). Classic encryption is old, so a determined attacker with special tools could still recover a key; for high security use DESFire/NTAG424 cards with a PN532 reader. Never change or leak `SECRET_KEY`.
+* Test box on the kiosk ("Simulate scan") sends no secret, so it cannot impersonate a secured card.
 
 ## SD card (important to read)
 Render cannot reach an SD card that is plugged into your Arduino, so the SD card works as an **offline backup log** (`LOG.CSV`,

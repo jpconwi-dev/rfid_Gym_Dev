@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Integer, String,
-                        create_engine)
+                        create_engine, inspect, text)
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 # ---------------------------------------------------------------- config
@@ -63,6 +63,8 @@ class User(Base):
     plan_days = Column(Integer, default=30)  # length of the latest paid period (for the progress ring)
     months_paid = Column(Integer, default=0)  # lifetime months paid
     banned = Column(Boolean, default=False)
+    token = Column(String(64), nullable=True)  # secret written onto the card (never shown in the UI)
+    card_secured = Column(Boolean, default=False)  # True once the token was written to the physical card
 
 
 class Attendance(Base):
@@ -196,6 +198,7 @@ def user_out(u: User, in_gym: bool = False) -> dict:
         "plan_days": u.plan_days or 30, "months_paid": u.months_paid or 0,
         "joined_at": iso(u.joined_at), "expires_at": iso(u.expires_at),
         "must_change_password": bool(u.must_change_password), "in_gym": in_gym,
+        "card_secured": bool(u.card_secured),
     }
 
 
@@ -245,9 +248,19 @@ app = FastAPI(title="RFID Gym API")
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 
+def migrate():
+    cols = {c["name"] for c in inspect(engine).get_columns("users")}
+    with engine.begin() as con:
+        if "token" not in cols:
+            con.execute(text("ALTER TABLE users ADD COLUMN token VARCHAR(64)"))
+        if "card_secured" not in cols:
+            con.execute(text("ALTER TABLE users ADD COLUMN card_secured BOOLEAN DEFAULT FALSE"))
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(engine)
+    migrate()
     db = SessionLocal()
     try:
         if not db.query(User).filter_by(role="admin").first():
@@ -312,6 +325,11 @@ def my_analytics(tz: int = Query(0), u: User = Depends(current_user), db: Sessio
 # ---- kiosk (scanner)
 class ScanIn(BaseModel):
     uid: str
+    token: Optional[str] = None  # secret read from the card by the Arduino
+
+
+class SecuredIn(BaseModel):
+    uid: str
 
 
 class SdIn(BaseModel):
@@ -326,7 +344,7 @@ def scan(body: ScanIn, db: Session = Depends(get_db)):
     u = db.query(User).filter_by(uid=uid, role="member").first()
 
     def reply(result, l1, l2, msg, **extra):
-        return {"result": result, "message": msg, "uid": uid, "lcd": [lcd_safe(l1), lcd_safe(l2)],
+        return {"result": result, "message": msg, "lcd": [lcd_safe(l1), lcd_safe(l2)],
                 "name": u.name if u else None, "days_left": days_left(u) if u else None, **extra}
 
     if not u:
@@ -337,6 +355,15 @@ def scan(body: ScanIn, db: Session = Depends(get_db)):
             db.add(UnregisteredScan(uid=uid))
         db.commit()
         return reply("unregistered", "CARD NOT", "REGISTERED", "This card is not registered. See the front desk.")
+    if not u.card_secured:  # first tap: write a secret onto the card (no check-in yet)
+        if not u.token:
+            u.token = secrets.token_hex(16)
+            db.commit()
+        return reply("provision", "SECURING CARD", "KEEP ON READER",
+                     "Securing your card. Keep it on the reader.", provision_token=u.token)
+    if not body.token or not hmac.compare_digest(body.token.lower(), (u.token or "").lower()):
+        return {"result": "invalid_card", "message": "Invalid card. Please see the front desk.",
+                "lcd": ["INVALID CARD", "SEE FRONT DESK"], "name": None, "days_left": None}
     if u.banned:
         return reply("banned", u.name, "ACCESS DENIED", "Your account is banned. Please see the front desk.")
     left = days_left(u)
@@ -347,6 +374,8 @@ def scan(body: ScanIn, db: Session = Depends(get_db)):
     if s and t - s.check_in > timedelta(hours=STALE_SESSION_HOURS):
         s.check_out, s.auto_closed = s.check_in, True  # forgot to tap out last time
         s = None
+    if s and t - s.check_in < timedelta(seconds=10):  # double tap
+        return reply("checked_in", u.name, f"IN  {left}d left", f"Already checked in. {left} day(s) left.")
     if s:
         s.check_out = t
         dur = fmt_dur((t - s.check_in).total_seconds())
@@ -355,6 +384,16 @@ def scan(body: ScanIn, db: Session = Depends(get_db)):
     db.add(Attendance(user_id=u.id, check_in=t))
     db.commit()
     return reply("checked_in", u.name, f"IN  {left}d left", f"Welcome! Checked in. {left} day(s) left.")
+
+
+@app.post("/api/kiosk/secured", dependencies=[Depends(kiosk_auth)])
+def card_secured(body: SecuredIn, db: Session = Depends(get_db)):
+    u = db.query(User).filter_by(uid=norm_uid(body.uid), role="member").first()
+    if not u:
+        raise HTTPException(404, "Card not registered")
+    u.card_secured = True
+    db.commit()
+    return {"ok": True}
 
 
 @app.post("/api/kiosk/storage", dependencies=[Depends(kiosk_auth)])
@@ -433,6 +472,7 @@ def register_member(body: MemberIn, _: User = Depends(admin_only), db: Session =
     pw = default_password()
     u = User(role="member", name=body.name.strip(), username=make_username(db, body.name),
              password_hash=hash_pw(pw), must_change_password=True, uid=uid, joined_at=t,
+             token=secrets.token_hex(16), card_secured=False,
              expires_at=exp, plan_days=(exp - t).days, months_paid=body.months)
     db.add(u)
     old = db.get(UnregisteredScan, uid)

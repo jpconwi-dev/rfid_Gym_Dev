@@ -98,10 +98,15 @@ td .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .screen.checked_in { background: radial-gradient(circle at center, #16300f, var(--bg) 70%); }
 .screen.checked_out { background: radial-gradient(circle at center, #0f2438, var(--bg) 70%); }
 .screen.expired { background: radial-gradient(circle at center, #33260a, var(--bg) 70%); }
-.screen.banned, .screen.unregistered { background: radial-gradient(circle at center, #351214, var(--bg) 70%); }
+.screen.provision, .screen.secured { background: radial-gradient(circle at center, #10243a, var(--bg) 70%); }
+.screen.banned, .screen.unregistered, .screen.invalid_card { background: radial-gradient(circle at center, #351214, var(--bg) 70%); }
 .pulse { width: 90px; height: 90px; border-radius: 50%; border: 3px solid var(--accent); margin: 0 auto 22px; animation: pulse 2s infinite; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(198,255,61,.5); } 100% { box-shadow: 0 0 0 40px rgba(198,255,61,0); } }
 .kbar { display: flex; gap: 12px; align-items: center; padding: 12px 20px; background: var(--panel); border-top: 1px solid var(--line); flex-wrap: wrap; }
+.tapbox { border: 1px dashed var(--line); border-radius: 12px; padding: 18px; text-align: center; margin-bottom: 12px; background: var(--bg); }
+.tapbox.got { border: 1px solid var(--ok); }
+.seg { display: flex; gap: 6px; margin-bottom: 14px; }
+.seg button { flex: 1; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); display: inline-block; margin-right: 6px; }
 .dot.on { background: var(--ok); }
 

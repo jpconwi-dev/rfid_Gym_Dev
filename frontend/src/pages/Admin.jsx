@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { Modal, Pill, TopBar } from "../components.jsx";
-import { fmtDate, fmtDateTime, fmtKB, fmtMin } from "../util";
+import { fmtDate, fmtDateTime, fmtKB, fmtMin, maskUid } from "../util";
 
 const MONTH_CHOICES = [1, 2, 3, 6, 12];
 
@@ -24,21 +24,34 @@ function MonthPicker({ value, onChange }) {
 function RegisterModal({ onClose, onCreated }) {
   const [name, setName] = useState("");
   const [uid, setUid] = useState("");
+  const [mode, setMode] = useState("tap");
   const [months, setMonths] = useState(1);
   const [scans, setScans] = useState([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const base = useRef(null);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   useEffect(() => {
-    const load = () => api.unregistered().then(setScans).catch(() => {});
+    const load = () => api.unregistered().then((list) => {
+      setScans(list);
+      if (base.current === null) { base.current = new Map(list.map((s) => [s.uid, s.last_seen])); return; }
+      const fresh = list.find((s) => base.current.get(s.uid) !== s.last_seen);
+      if (fresh) {
+        base.current.set(fresh.uid, fresh.last_seen);
+        if (modeRef.current === "tap") setUid(fresh.uid);
+      }
+    }).catch(() => {});
     load();
-    const t = setInterval(load, 3000);
+    const t = setInterval(load, 2000);
     return () => clearInterval(t);
   }, []);
 
   const submit = async (e) => {
     e.preventDefault();
     setErr("");
+    if (!uid) return setErr(mode === "tap" ? "Tap the new card on the scanner first." : "Type the card UID first.");
     setBusy(true);
     try {
       onCreated(await api.register({ name, uid, months: Number(months) }));
@@ -48,24 +61,49 @@ function RegisterModal({ onClose, onCreated }) {
     }
   };
 
+  const pickMode = (m) => { setMode(m); setUid(""); };
+
   return (
     <Modal title="Register new member" onClose={onClose}>
       <form onSubmit={submit}>
         <label className="field"><span>Full name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} autoFocus /></label>
-        <div className="field"><span>RFID card — tap the new card on the kiosk scanner, then pick it here</span>
-          <div className="chips">
-            {scans.length === 0 && <span className="muted">No unregistered card scanned yet…</span>}
-            {scans.map((s) => (
-              <button type="button" key={s.uid} className={`chip mono ${uid === s.uid ? "on" : ""}`} onClick={() => setUid(s.uid)}>{s.uid}</button>
-            ))}
+
+        <div className="field"><span>RFID card</span>
+          <div className="seg">
+            <button type="button" className={`chip ${mode === "tap" ? "on" : ""}`} onClick={() => pickMode("tap")}>Tap card on scanner</button>
+            <button type="button" className={`chip ${mode === "type" ? "on" : ""}`} onClick={() => pickMode("type")}>Type card number</button>
           </div>
-          <input className="mono" placeholder="or type the UID, e.g. A1 B2 C3 D4" value={uid} onChange={(e) => setUid(e.target.value)} required />
+          {mode === "tap" ? (
+            <>
+              <div className={`tapbox ${uid ? "got" : ""}`}>
+                {uid ? (
+                  <><b style={{ color: "var(--ok)" }}>Card detected ✓</b><div className="mono muted">{maskUid(uid)}</div>
+                    <button type="button" className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setUid("")}>Use a different card</button></>
+                ) : (
+                  <><div className="pulse" style={{ width: 40, height: 40, marginBottom: 10 }} />
+                    <div>Waiting for a card… tap the new card on the kiosk scanner.</div></>
+                )}
+              </div>
+              {scans.length > 0 && (
+                <><div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Or pick a card scanned in the last 24 hours:</div>
+                  <div className="chips">
+                    {scans.map((s) => (
+                      <button type="button" key={s.uid} className={`chip mono ${uid === s.uid ? "on" : ""}`} onClick={() => setUid(s.uid)}>{maskUid(s.uid)}</button>
+                    ))}
+                  </div></>
+              )}
+            </>
+          ) : (
+            <input className="mono" placeholder="e.g. A1 B2 C3 D4" value={uid} onChange={(e) => setUid(e.target.value)} autoComplete="off" />
+          )}
         </div>
+
         <MonthPicker value={months} onChange={setMonths} />
+        <div className="msg warn" style={{ fontSize: 13 }}>After creating the account, tap the card once on the kiosk: the scanner writes a secret code onto it ("card secured"). Until then it is not protected.</div>
         {err && <div className="msg err">{err}</div>}
         <div className="row">
-          <button className="btn" disabled={busy}>{busy ? "Creating…" : "Create account"}</button>
+          <button className="btn" disabled={busy || !uid}>{busy ? "Creating…" : "Create account"}</button>
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -192,12 +230,12 @@ function Members() {
       {note && <div className={`msg ${note.t}`} onClick={() => setNote(null)}>{note.m}</div>}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Member</th><th>Card UID</th><th>Status</th><th>Days left</th><th>Expires</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Member</th><th>Card</th><th>Status</th><th>Days left</th><th>Expires</th><th>Actions</th></tr></thead>
           <tbody>
             {shown.map((m) => (
               <tr key={m.id}>
                 <td><b>{m.name}</b> {m.in_gym && <span className="pill in">in gym</span>}<div className="muted mono">{m.username}</div></td>
-                <td className="mono">{m.uid}</td>
+                <td><span className="mono">{maskUid(m.uid)}</span><div>{m.card_secured ? <span className="pill active">secured</span> : <span className="pill expired">not secured</span>}</div></td>
                 <td><Pill status={m.status} /></td>
                 <td>{m.days_left}</td>
                 <td>{fmtDate(m.expires_at)}</td>

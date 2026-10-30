@@ -10,7 +10,12 @@ const TITLES = {
   expired: "Membership ended",
   banned: "Access denied",
   unregistered: "Card not registered",
+  invalid_card: "Invalid card",
+  provision: "Securing your card",
+  secured: "Card secured",
 };
+
+const labelOf = (r) => r.name || (r.result === "unregistered" ? "unregistered card" : r.result === "invalid_card" ? "invalid card" : "card");
 
 export default function Kiosk() {
   const [key, setKey] = useState(localStorage.getItem("gym_kiosk_key") || "");
@@ -25,13 +30,32 @@ export default function Kiosk() {
   const link = useRef(null);
   const timer = useRef(null);
   const busy = useRef(false);
+  const pending = useRef(null); // card being secured right now
 
-  const handleScan = useCallback(async (uid) => {
+  const flash = (r, lcd) => {
+    setShown(r);
+    setRecent((p) => [{ ...r, at: new Date() }, ...p].slice(0, 6));
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setShown(null), 6000);
+    if (lcd) link.current?.send(`LCD:${lcd[0]}|${lcd[1]}`);
+  };
+
+  const handleScan = useCallback(async (uid, token) => {
     if (busy.current) return;
     busy.current = true;
     try {
-      const r = await api.scan(uid, keyRef.current);
+      const r = await api.scan(uid, token, keyRef.current);
       setErr("");
+      if (r.result === "provision") {
+        if (!link.current?.writer) {
+          flash({ result: "invalid_card", message: "Connect the scanner to secure this card." });
+          return;
+        }
+        pending.current = uid;
+        flash(r);
+        link.current.send(`WRITE:${r.provision_token}`);
+        return;
+      }
       setShown(r);
       setRecent((p) => [{ ...r, at: new Date() }, ...p].slice(0, 6));
       clearTimeout(timer.current);
@@ -48,8 +72,21 @@ export default function Kiosk() {
   }, []);
 
   const onLine = (line) => {
-    const u = line.match(/^UID:\s*(.+)$/i);
-    if (u) return handleScan(u[1]);
+    const c = line.match(/^CARD:(.+)\|(\w+)$/i);
+    if (c) return handleScan(c[1].trim(), c[2] === "NONE" ? null : c[2]);
+    if (line === "WROTE:OK" && pending.current) {
+      const uid = pending.current;
+      pending.current = null;
+      api.cardSecured(uid, keyRef.current)
+        .then(() => flash({ result: "secured", message: "Card secured. Tap again to check in." }, ["CARD SECURED", "TAP AGAIN"]))
+        .catch((e) => setErr(e.message));
+      return;
+    }
+    if (line === "WROTE:FAIL") {
+      pending.current = null;
+      flash({ result: "invalid_card", message: "Could not secure the card. Keep it flat on the reader and tap again." }, ["WRITE FAILED", "TAP AGAIN"]);
+      return;
+    }
     const s = line.match(/^SD:(\d):(\d+):(\d+)$/);
     if (s) {
       const v = { ok: s[1] === "1", used_kb: +s[2], total_kb: +s[3] };
@@ -119,7 +156,7 @@ export default function Kiosk() {
         <span className="grow" />
         <input style={{ width: 150 }} type="password" placeholder="Kiosk key" value={key} onChange={(e) => saveKey(e.target.value)} />
         <input style={{ width: 150 }} placeholder="Test UID" value={manual} onChange={(e) => setManual(e.target.value)} />
-        <button className="btn ghost sm" onClick={() => manual && handleScan(manual)}>Simulate scan</button>
+        <button className="btn ghost sm" onClick={() => manual && handleScan(manual, null)}>Simulate scan</button>
         <Link to="/">Login</Link>
       </div>
       {!serialSupported() && <div className="msg warn" style={{ margin: 12 }}>This browser has no Web Serial support. Use Chrome or Edge on a desktop/laptop.</div>}
@@ -127,7 +164,7 @@ export default function Kiosk() {
       {recent.length > 0 && (
         <div className="kbar" style={{ gap: 18 }}>
           {recent.map((r, i) => (
-            <span key={i} className="muted mono">{r.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {r.name || r.uid} · {r.result}</span>
+            <span key={i} className="muted">{r.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {labelOf(r)} · {r.result.replace("_", " ")}</span>
           ))}
         </div>
       )}

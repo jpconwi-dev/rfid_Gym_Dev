@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth.jsx";
 import { ChangePassword, Modal, Pill, TopBar } from "../components.jsx";
-import { fmtDate, fmtDateTime, fmtMin } from "../util";
+import { fmtDate, fmtDateTime, fmtMin, maskUid } from "../util";
 
 function Ring({ left, total }) {
   const r = 62, c = 2 * Math.PI * r;
@@ -57,7 +57,7 @@ export default function Member() {
               {me.status === "expired" && `Your membership ended on ${fmtDate(me.expires_at)}. Please renew at the front desk.`}
               {me.status === "banned" && "Your account is banned. Please see the front desk."}
             </p>
-            <p className="muted mono" style={{ margin: "6px 0 0" }}>Card {me.uid} · member since {fmtDate(me.joined_at)}</p>
+            <p className="muted mono" style={{ margin: "6px 0 0" }}>Card {maskUid(me.uid)} · member since {fmtDate(me.joined_at)}</p>
           </div>
           <button className="btn ghost sm" onClick={() => { setPwDone(false); setPwOpen(true); }}>Change password</button>
         </div>

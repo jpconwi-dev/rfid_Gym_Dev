@@ -30,7 +30,8 @@ export const api = {
   changePassword: (current_password, new_password) =>
     req("/api/me/password", { method: "POST", body: { current_password, new_password } }),
   analytics: () => req(`/api/me/analytics?tz=${tz()}`),
-  scan: (uid, kioskKey) => req("/api/scan", { method: "POST", body: { uid }, kioskKey }),
+  scan: (uid, token, kioskKey) => req("/api/scan", { method: "POST", body: { uid, token }, kioskKey }),
+  cardSecured: (uid, kioskKey) => req("/api/kiosk/secured", { method: "POST", body: { uid }, kioskKey }),
   reportStorage: (b, kioskKey) => req("/api/kiosk/storage", { method: "POST", body: b, kioskKey }),
   overview: () => req(`/api/admin/overview?tz=${tz()}`),
   members: () => req("/api/admin/members"),
