@@ -55,6 +55,10 @@ Wiring is in the sketch header (SD module: CS→D4, SCK/MOSI/MISO shared with th
 
 **First run:** open `/kiosk` → *Connect scanner* → pick the Arduino port → enter the same `KIOSK_KEY` → done (it reconnects automatically next time).
 
+## Troubleshooting the scanner
+* The kiosk page has a **Reader log** line showing the last things the Arduino sent (card numbers hidden). Empty after a tap = the Arduino is not sending (wiring/sketch). `CARD:` lines but no result = server/key problem (see the red message).
+* In the sketch, `#define USE_SD 0` runs everything without the SD module — if scanning works with `0` but not with `1`, the SD module is disturbing the shared SPI wires.
+
 ## Notes
 * Render's free plan sleeps when idle, so the first tap after a quiet period can take ~1 min; use a paid instance for a front-desk system.
 * RFID UIDs can be cloned; this is fine for a gym but not for high-security access.

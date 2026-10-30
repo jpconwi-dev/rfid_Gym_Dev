@@ -66,6 +66,11 @@ export default function Member() {
         {a && (
           <>
             <div className="grid stats">
+              <Stat label="Age" value={me.age ?? "—"} sub={me.birthday ? `Born ${fmtDate(me.birthday)}` : "not set"} />
+              <Stat label="Gender" value={me.gender || "—"} sub="" />
+              <Stat label="Weight" value={me.weight_kg ? `${me.weight_kg} kg` : "—"} sub="updated by the front desk" />
+            </div>
+            <div className="grid stats">
               <Stat label="Hours this week" value={a.hours_week} sub="last 7 days" />
               <Stat label="Hours this month" value={a.hours_month} sub={`${a.visits_month} visits in 30 days`} />
               <Stat label="Average session" value={fmtMin(a.avg_session_min)} sub="per visit" />

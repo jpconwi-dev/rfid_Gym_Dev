@@ -10,15 +10,15 @@ import math
 import os
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Integer, String,
-                        create_engine, inspect, text)
+from sqlalchemy import (Boolean, Column, Date, DateTime, Float, ForeignKey, Integer,
+                        String, create_engine, inspect, text)
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 # ---------------------------------------------------------------- config
@@ -64,6 +64,9 @@ class User(Base):
     months_paid = Column(Integer, default=0)  # lifetime months paid
     banned = Column(Boolean, default=False)
     token = Column(String(64), nullable=True)  # secret written onto the card (never shown in the UI)
+    birthday = Column(Date, nullable=True)
+    gender = Column(String(20), nullable=True)
+    weight_kg = Column(Float, nullable=True)
     card_secured = Column(Boolean, default=False)  # True once the token was written to the physical card
 
 
@@ -191,6 +194,13 @@ def open_session(db: Session, uid: int) -> Optional[Attendance]:
             .order_by(Attendance.check_in.desc()).first())
 
 
+def age_of(b: Optional[date]) -> Optional[int]:
+    if not b:
+        return None
+    t = now().date()
+    return t.year - b.year - ((t.month, t.day) < (b.month, b.day))
+
+
 def user_out(u: User, in_gym: bool = False) -> dict:
     return {
         "id": u.id, "role": u.role, "name": u.name, "username": u.username, "uid": u.uid,
@@ -198,7 +208,8 @@ def user_out(u: User, in_gym: bool = False) -> dict:
         "plan_days": u.plan_days or 30, "months_paid": u.months_paid or 0,
         "joined_at": iso(u.joined_at), "expires_at": iso(u.expires_at),
         "must_change_password": bool(u.must_change_password), "in_gym": in_gym,
-        "card_secured": bool(u.card_secured),
+        "card_secured": bool(u.card_secured), "birthday": u.birthday.isoformat() if u.birthday else None,
+        "age": age_of(u.birthday), "gender": u.gender, "weight_kg": u.weight_kg,
     }
 
 
@@ -253,6 +264,9 @@ def migrate():
     with engine.begin() as con:
         if "token" not in cols:
             con.execute(text("ALTER TABLE users ADD COLUMN token VARCHAR(64)"))
+        for col, typ in (("birthday", "DATE"), ("gender", "VARCHAR(20)"), ("weight_kg", "FLOAT")):
+            if col not in cols:
+                con.execute(text(f"ALTER TABLE users ADD COLUMN {col} {typ}"))
         if "card_secured" not in cols:
             con.execute(text("ALTER TABLE users ADD COLUMN card_secured BOOLEAN DEFAULT FALSE"))
 
@@ -405,10 +419,30 @@ def report_storage(body: SdIn, db: Session = Depends(get_db)):
 
 
 # ---- admin
-class MemberIn(BaseModel):
+GENDERS = {"Male", "Female", "Other", "Prefer not to say"}
+
+
+class ProfileFields(BaseModel):
+    birthday: Optional[date] = None
+    gender: Optional[str] = None
+    weight_kg: Optional[float] = Field(default=None, ge=20, le=400)
+
+
+def check_profile(b: ProfileFields):
+    if b.gender and b.gender not in GENDERS:
+        raise HTTPException(422, "Invalid gender option")
+    if b.birthday and not (date(1900, 1, 1) <= b.birthday <= now().date()):
+        raise HTTPException(422, "Birthday is not a valid date")
+
+
+class MemberIn(ProfileFields):
     name: str = Field(min_length=2, max_length=80)
     uid: str
     months: int = Field(ge=1, le=36)
+
+
+class ProfileIn(ProfileFields):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=80)
 
 
 class RenewIn(BaseModel):
@@ -464,6 +498,7 @@ def list_members(_: User = Depends(admin_only), db: Session = Depends(get_db)):
 
 @app.post("/api/admin/members")
 def register_member(body: MemberIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    check_profile(body)
     uid = norm_uid(body.uid)
     if db.query(User).filter_by(uid=uid).first():
         raise HTTPException(409, "This card is already registered to another member")
@@ -473,6 +508,7 @@ def register_member(body: MemberIn, _: User = Depends(admin_only), db: Session =
     u = User(role="member", name=body.name.strip(), username=make_username(db, body.name),
              password_hash=hash_pw(pw), must_change_password=True, uid=uid, joined_at=t,
              token=secrets.token_hex(16), card_secured=False,
+             birthday=body.birthday, gender=body.gender, weight_kg=body.weight_kg,
              expires_at=exp, plan_days=(exp - t).days, months_paid=body.months)
     db.add(u)
     old = db.get(UnregisteredScan, uid)
@@ -487,6 +523,17 @@ def get_member(db: Session, mid: int) -> User:
     if not u or u.role != "member":
         raise HTTPException(404, "Member not found")
     return u
+
+
+@app.post("/api/admin/members/{mid}/profile")
+def update_profile(mid: int, body: ProfileIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    check_profile(body)
+    u = get_member(db, mid)
+    if body.name:
+        u.name = body.name.strip()
+    u.birthday, u.gender, u.weight_kg = body.birthday, body.gender, body.weight_kg
+    db.commit()
+    return user_out(u)
 
 
 @app.post("/api/admin/members/{mid}/renew")

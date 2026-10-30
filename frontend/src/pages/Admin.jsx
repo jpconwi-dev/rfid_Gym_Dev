@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { Modal, Pill, TopBar } from "../components.jsx";
-import { fmtDate, fmtDateTime, fmtKB, fmtMin, maskUid } from "../util";
+import { GENDERS, calcAge, fmtDate, fmtDateTime, fmtKB, fmtMin, maskUid } from "../util";
 
 const MONTH_CHOICES = [1, 2, 3, 6, 12];
 
@@ -21,11 +21,53 @@ function MonthPicker({ value, onChange }) {
   );
 }
 
+function ProfileFields({ v, set }) {
+  const age = calcAge(v.birthday);
+  return (
+    <>
+      <div className="row" style={{ alignItems: "flex-start" }}>
+        <label className="field grow"><span>Birthday{age != null ? ` — age ${age}` : ""}</span>
+          <input type="date" value={v.birthday} max={new Date().toISOString().slice(0, 10)} onChange={(e) => set({ ...v, birthday: e.target.value })} /></label>
+        <label className="field grow"><span>Gender</span>
+          <select value={v.gender} onChange={(e) => set({ ...v, gender: e.target.value })}>
+            <option value="">—</option>{GENDERS.map((g) => <option key={g}>{g}</option>)}
+          </select></label>
+      </div>
+      <label className="field"><span>Weight (kg)</span>
+        <input type="number" step="0.1" min="20" max="400" value={v.weight_kg} onChange={(e) => set({ ...v, weight_kg: e.target.value })} placeholder="e.g. 68.5" /></label>
+    </>
+  );
+}
+
+const emptyProfile = { birthday: "", gender: "", weight_kg: "" };
+const profileBody = (v) => ({ birthday: v.birthday || null, gender: v.gender || null, weight_kg: v.weight_kg === "" ? null : Number(v.weight_kg) });
+
+function EditModal({ member, onClose, onDone }) {
+  const [name, setName] = useState(member.name);
+  const [p, setP] = useState({ birthday: member.birthday || "", gender: member.gender || "", weight_kg: member.weight_kg ?? "" });
+  const [err, setErr] = useState("");
+  const submit = async (e) => {
+    e.preventDefault();
+    try { await api.updateProfile(member.id, { name, ...profileBody(p) }); onDone(); } catch (ex) { setErr(ex.message); }
+  };
+  return (
+    <Modal title={`Edit — ${member.name}`} onClose={onClose}>
+      <form onSubmit={submit}>
+        <label className="field"><span>Full name</span><input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} /></label>
+        <ProfileFields v={p} set={setP} />
+        {err && <div className="msg err">{err}</div>}
+        <div className="row"><button className="btn">Save</button><button type="button" className="btn ghost" onClick={onClose}>Cancel</button></div>
+      </form>
+    </Modal>
+  );
+}
+
 function RegisterModal({ onClose, onCreated }) {
   const [name, setName] = useState("");
   const [uid, setUid] = useState("");
   const [mode, setMode] = useState("tap");
   const [months, setMonths] = useState(1);
+  const [prof, setProf] = useState(emptyProfile);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const base = useRef(null);
@@ -52,7 +94,7 @@ function RegisterModal({ onClose, onCreated }) {
     if (!uid) return setErr(mode === "tap" ? "Tap the new card on the scanner first." : "Type the card UID first.");
     setBusy(true);
     try {
-      onCreated(await api.register({ name, uid, months: Number(months) }));
+      onCreated(await api.register({ name, uid, months: Number(months), ...profileBody(prof) }));
     } catch (ex) {
       setErr(ex.message);
       setBusy(false);
@@ -66,6 +108,8 @@ function RegisterModal({ onClose, onCreated }) {
       <form onSubmit={submit}>
         <label className="field"><span>Full name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} autoFocus /></label>
+
+        <ProfileFields v={prof} set={setProf} />
 
         <div className="field"><span>RFID card</span>
           <div className="seg">
@@ -224,12 +268,13 @@ function Members() {
           <tbody>
             {shown.map((m) => (
               <tr key={m.id}>
-                <td><b>{m.name}</b> {m.in_gym && <span className="pill in">in gym</span>}<div className="muted mono">{m.username}</div></td>
+                <td><b>{m.name}</b> {m.in_gym && <span className="pill in">in gym</span>}<div className="muted mono">{m.username}</div>{(m.age != null || m.gender || m.weight_kg) && <div className="muted" style={{ fontSize: 12 }}>{[m.age != null && `${m.age} yrs`, m.gender, m.weight_kg && `${m.weight_kg} kg`].filter(Boolean).join(" · ")}</div>}</td>
                 <td><span className="mono">{maskUid(m.uid)}</span><div>{m.card_secured ? <span className="pill active">secured</span> : <span className="pill expired">not secured</span>}</div></td>
                 <td><Pill status={m.status} /></td>
                 <td>{m.days_left}</td>
                 <td>{fmtDate(m.expires_at)}</td>
                 <td><div className="actions">
+                  <button className="btn ghost sm" onClick={() => setModal({ type: "edit", m })}>Edit</button>
                   <button className="btn ghost sm" onClick={() => setModal({ type: "renew", m })}>Renew</button>
                   <button className="btn ghost sm" onClick={() => act(() => api.ban(m.id, !m.banned), m.banned ? "Member unbanned." : "Member banned.")}>{m.banned ? "Unban" : "Ban"}</button>
                   <button className="btn ghost sm" onClick={async () => {
@@ -247,6 +292,7 @@ function Members() {
       </div>
       {modal?.type === "register" && <RegisterModal onClose={() => setModal(null)} onCreated={(d) => { load(); setModal({ type: "creds", data: d }); }} />}
       {modal?.type === "creds" && <Credentials data={modal.data} onClose={() => setModal(null)} />}
+      {modal?.type === "edit" && <EditModal member={modal.m} onClose={() => setModal(null)} onDone={() => { setModal(null); load(); setNote({ t: "ok", m: "Profile saved." }); }} />}
       {modal?.type === "renew" && <RenewModal member={modal.m} onClose={() => setModal(null)} onDone={() => { setModal(null); load(); setNote({ t: "ok", m: "Membership renewed." }); }} />}
     </div>
   );

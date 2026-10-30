@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { SerialLink, serialSupported } from "../serial";
-import { fmtKB } from "../util";
+import { fmtKB, maskUid } from "../util";
+
+// Shows what the Arduino sends, with card numbers and secrets hidden.
+const safeLine = (l) =>
+  l.replace(/^(CARD|UID):\s*([0-9A-F ]+)/i, (_, t, u) => `${t}: ${maskUid(u.trim())}`).replace(/\|[0-9A-F]{32}$/i, "|(secret)");
 
 const TITLES = {
   checked_in: "Welcome in",
@@ -25,6 +29,7 @@ export default function Kiosk() {
   const [sd, setSd] = useState(null);
   const [err, setErr] = useState("");
   const [legacy, setLegacy] = useState(false);
+  const [raw, setRaw] = useState([]);
   const [manual, setManual] = useState("");
   const keyRef = useRef(key);
   keyRef.current = key;
@@ -73,6 +78,7 @@ export default function Kiosk() {
   }, []);
 
   const onLine = (line) => {
+    setRaw((p) => [safeLine(line), ...p].slice(0, 4));
     const old = line.match(/^UID:\s*(.+)$/i);
     if (old) { setLegacy(true); return handleScan(old[1].trim(), null); }
     const c = line.match(/^CARD:(.+)\|(\w+)$/i);
@@ -164,6 +170,9 @@ export default function Kiosk() {
       </div>
       {!serialSupported() && <div className="msg warn" style={{ margin: 12 }}>This browser has no Web Serial support. Use Chrome or Edge on a desktop/laptop.</div>}
       {legacy && <div className="msg warn" style={{ margin: 12 }}>The Arduino is running the OLD sketch. Upload the new RFID_Membership.ino from the latest zip to enable secure cards and the LCD results.</div>}
+      <div className="kbar muted mono" style={{ fontSize: 12, gap: 16 }}>
+        <span>Reader log:</span>{raw.length ? raw.map((l, i) => <span key={i}>{l}</span>) : <span>nothing received from the Arduino yet</span>}
+      </div>
       {err && <div className="msg err" style={{ margin: 12 }}>{err}</div>}
       {recent.length > 0 && (
         <div className="kbar" style={{ gap: 18 }}>

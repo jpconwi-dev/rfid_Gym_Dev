@@ -36,6 +36,7 @@ export const api = {
   overview: () => req(`/api/admin/overview?tz=${tz()}`),
   members: () => req("/api/admin/members"),
   register: (b) => req("/api/admin/members", { method: "POST", body: b }),
+  updateProfile: (id, b) => req(`/api/admin/members/${id}/profile`, { method: "POST", body: b }),
   renew: (id, months) => req(`/api/admin/members/${id}/renew`, { method: "POST", body: { months } }),
   ban: (id, banned) => req(`/api/admin/members/${id}/ban`, { method: "POST", body: { banned } }),
   resetPassword: (id) => req(`/api/admin/members/${id}/reset-password`, { method: "POST" }),

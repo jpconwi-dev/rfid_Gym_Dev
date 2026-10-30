@@ -23,8 +23,11 @@
     SD     CS D4,      SCK D13, MOSI D11, MISO D12, VCC 5V (module with regulator), GND
     LCD    SDA A4, SCL A5, VCC 5V, GND
 */
+#define USE_SD 1  // set to 0 to run WITHOUT the SD module (useful for testing the scanner alone)
 #include <SPI.h>
+#if USE_SD
 #include <SD.h>
+#endif
 #include <MFRC522.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -44,8 +47,10 @@ const uint32_t SD_LIMIT_KB = 0;
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 LiquidCrystal_I2C lcd(0x27, 16, 2);  // use 0x3F if your LCD module needs it
+#if USE_SD
 Sd2Card card;
 SdVolume volume;
+#endif
 MFRC522::MIFARE_Key keySecret, keyDefault;
 
 bool sdOk = false;
@@ -114,6 +119,7 @@ bool provision(const char *hex) {
 }
 
 // ---------------------------------------------------------------- SD card
+#if USE_SD
 uint32_t logUsedKB() {
   File f = SD.open(LOG_FILE, FILE_READ);
   if (!f) return 0;
@@ -150,6 +156,11 @@ void sdLog(const char *text) {
   }
   sdReport();
 }
+#else
+void sdInit() {}
+void sdReport() { Serial.println(F("SD:0:0:0")); }
+void sdLog(const char *) { sdReport(); }
+#endif
 
 // ---------------------------------------------------------------- serial commands
 void handleLine(char *s) {
